@@ -72,7 +72,6 @@ export function ForgotPasswordPage() {
         <AuthFormActions
           submitLabel="Send reset link"
           isSubmitting={isSubmitting}
-          helperAction={<Link to="/auth/reset-password">Already have token?</Link>}
         />
       </form>
     </AuthCard>

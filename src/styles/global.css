@@ -143,6 +143,38 @@ a:hover {
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
+.form-field-input-wrapper {
+  position: relative;
+}
+
+.form-field-input-wrapper input {
+  padding-right: 40px;
+}
+
+.password-toggle-button {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  border: 0;
+  background: transparent;
+  color: #64748b;
+  padding: 0;
+  width: 20px;
+  height: 20px;
+  cursor: pointer;
+}
+
+.password-toggle-button:hover {
+  color: #334155;
+}
+
+.password-toggle-button svg {
+  width: 100%;
+  height: 100%;
+  fill: currentColor;
+}
+
 .form-field input:focus {
   border-color: var(--brand-blue);
   outline: none;
