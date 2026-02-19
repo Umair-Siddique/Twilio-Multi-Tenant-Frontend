@@ -4,6 +4,7 @@ import { LoginPage } from "@/features/auth/pages/LoginPage";
 import { SignUpPage } from "@/features/auth/pages/SignUpPage";
 import { ForgotPasswordPage } from "@/features/auth/pages/ForgotPasswordPage";
 import { VerifyOtpPage } from "@/features/auth/pages/VerifyOtpPage";
+import { ResetPasswordPage } from "@/features/auth/pages/ResetPasswordPage";
 
 export const appRouter = createBrowserRouter([
   {
@@ -17,7 +18,8 @@ export const appRouter = createBrowserRouter([
       { path: "login", element: <LoginPage /> },
       { path: "signup", element: <SignUpPage /> },
       { path: "forgot-password", element: <ForgotPasswordPage /> },
-      { path: "verify-otp", element: <VerifyOtpPage /> }
+      { path: "verify-otp", element: <VerifyOtpPage /> },
+      { path: "reset-password", element: <ResetPasswordPage /> }
     ]
   },
   {

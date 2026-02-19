@@ -23,6 +23,18 @@ export type RefreshRequest = {
   refresh_token: string;
 };
 
+export type ForgotPasswordRequest = {
+  email: string;
+  redirect_to?: string;
+};
+
+export type ResetPasswordRequest = {
+  token?: string;
+  email?: string;
+  new_password: string;
+  access_token?: string;
+};
+
 export type TenantProfileResponse = {
   tenant: {
     id: string;
@@ -55,6 +67,18 @@ export const authApi = {
   },
   refresh(payload: RefreshRequest) {
     return request<AuthResponse>("/auth/refresh", {
+      method: "POST",
+      body: payload
+    });
+  },
+  forgotPassword(payload: ForgotPasswordRequest) {
+    return request<{ message: string }>("/auth/forgot-password", {
+      method: "POST",
+      body: payload
+    });
+  },
+  resetPassword(payload: ResetPasswordRequest) {
+    return request<{ message: string }>("/auth/reset-password", {
       method: "POST",
       body: payload
     });

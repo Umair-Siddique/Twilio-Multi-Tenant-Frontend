@@ -1,4 +1,10 @@
 :root {
+  --brand-blue:   #0047ab;
+  --brand-blue-hover: #003a8c;
+  --brand-blue-disabled: rgba(0, 71, 171, 0.4);
+  --brand-blue-ring: rgba(0, 71, 171, 0.18);
+  --brand-silver: #6b7280;
+
   color-scheme: light;
   font-family: "Inter", "Segoe UI", Arial, sans-serif;
   line-height: 1.4;
@@ -17,7 +23,7 @@ body {
 }
 
 a {
-  color: #3b82f6;
+  color: var(--brand-blue);
   text-decoration: none;
 }
 
@@ -32,19 +38,23 @@ a:hover {
 }
 
 .auth-info-panel {
-  background: linear-gradient(155deg, #111827, #1f2937 55%, #0f172a);
+  background-color: #0f172a;
   color: #f9fafb;
   padding: 56px 40px;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 16px;
+  align-items: flex-start;
+  gap: 12px;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
 }
 
 .auth-kicker {
   margin: 0;
   font-weight: 600;
-  color: #93c5fd;
+  color: var(--brand-silver);
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -61,10 +71,14 @@ a:hover {
 }
 
 .auth-form-panel {
-  display: grid;
-  place-items: center;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
   padding: 24px;
 }
+
 
 .auth-card {
   width: min(100%, 460px);
@@ -130,9 +144,9 @@ a:hover {
 }
 
 .form-field input:focus {
-  border-color: #3b82f6;
+  border-color: var(--brand-blue);
   outline: none;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+  box-shadow: 0 0 0 3px var(--brand-blue-ring);
 }
 
 .field-error {
@@ -149,26 +163,27 @@ a:hover {
 .form-actions button {
   border: 0;
   border-radius: 10px;
-  background: #2563eb;
+  background: var(--brand-blue);
   color: #ffffff;
   font-size: 0.95rem;
   font-weight: 600;
   padding: 12px;
   cursor: pointer;
+  transition: background 0.2s ease;
 }
 
 .form-actions button:hover {
-  background: #1d4ed8;
+  background: var(--brand-blue-hover);
 }
 
 .form-actions button:disabled {
-  background: #93c5fd;
+  background: var(--brand-blue-disabled);
   cursor: not-allowed;
 }
 
 .auth-card-footer {
   margin-top: 18px;
-  color: #475569;
+  color: var(--brand-silver);
   font-size: 0.92rem;
 }
 
