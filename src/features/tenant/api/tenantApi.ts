@@ -1,5 +1,21 @@
 import { request } from "@/shared/api/httpClient";
 
+// Tenant Profile Types
+export type Tenant = {
+  id: string;
+  name: string;
+  timezone: string;
+  industry: string;
+  default_email_recipients: string[];
+  status: string;
+  created_at: string;
+};
+
+export type TenantProfileResponse = {
+  tenant: Tenant;
+  user_role: string;
+};
+
 export type TenantProfilePayload = {
   name?: string;
   timezone?: string;
@@ -7,64 +23,122 @@ export type TenantProfilePayload = {
   default_email_recipients?: string[];
 };
 
-export type AgentConfigPayload = {
-  tone?: string;
+export type TenantProfileUpdateResponse = {
+  message: string;
+  tenant: Tenant;
+};
+
+// Agent Config Types
+export type BusinessHours = {
+  [key: string]: {
+    start: string;
+    end: string;
+  };
+};
+
+export type AgentConfig = {
+  id: string;
+  tenant_id: string;
   greeting?: string;
-  business_hours?: Record<string, unknown>;
+  system_prompt?: string;
+  tone?: string;
+  business_hours?: BusinessHours;
   escalation_rules?: Record<string, unknown>;
   allowed_actions?: string[];
-  custom_prompts?: Record<string, string>;
+  custom_prompts?: string;
+  store_transcripts?: boolean;
+  store_recordings?: boolean;
+  retention_days?: number;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type AgentConfigPayload = {
+  greeting?: string;
+  system_prompt?: string;
+  tone?: string;
+  business_hours?: BusinessHours;
+  escalation_rules?: Record<string, unknown>;
+  allowed_actions?: string[];
+  custom_prompts?: string;
   store_transcripts?: boolean;
   store_recordings?: boolean;
   retention_days?: number;
 };
 
-export type InviteUserPayload = {
-  user_id: string;
-  role: string;
+export type AgentConfigUpdateResponse = {
+  message: string;
+  config: AgentConfig;
+};
+
+// Phone Numbers Types (API may return twilio_number_sid from DB; we normalize to twilio_sid)
+export type PhoneNumber = {
+  id: string;
+  tenant_id: string;
+  phone_number: string;
+  twilio_sid: string;
+  status: string;
+  created_at: string;
+};
+
+type PhoneNumberApiRow = Omit<PhoneNumber, "twilio_sid"> & {
+  twilio_sid?: string;
+  twilio_number_sid?: string;
+};
+
+function normalizePhoneNumber(row: PhoneNumberApiRow): PhoneNumber {
+  const twilio_sid = row.twilio_sid ?? row.twilio_number_sid ?? "";
+  return {
+    id: row.id,
+    tenant_id: row.tenant_id,
+    phone_number: row.phone_number,
+    twilio_sid,
+    status: row.status,
+    created_at: row.created_at
+  };
+}
+
+export type PhoneNumbersResponse = {
+  phone_numbers: PhoneNumber[];
+};
+
+// Health Check
+export type HealthResponse = {
+  status: string;
+  service: string;
 };
 
 export const tenantApi = {
   getProfile() {
-    return request<Record<string, unknown>>("/tenant/profile", { auth: true });
+    return request<TenantProfileResponse>("/tenant/profile", { auth: true });
   },
   updateProfile(payload: TenantProfilePayload) {
-    return request<Record<string, unknown>>("/tenant/profile", {
+    return request<TenantProfileUpdateResponse>("/tenant/profile", {
       method: "PUT",
       auth: true,
       body: payload
     });
   },
   getAgentConfig() {
-    return request<Record<string, unknown>>("/tenant/agent-config", {
-      auth: true
-    });
+    return request<AgentConfig>("/tenant/agent-config", { auth: true });
   },
   updateAgentConfig(payload: AgentConfigPayload) {
-    return request<Record<string, unknown>>("/tenant/agent-config", {
+    return request<AgentConfigUpdateResponse>("/tenant/agent-config", {
       method: "PUT",
       auth: true,
       body: payload
     });
   },
-  getPhoneNumbers() {
-    return request<Record<string, unknown>>("/tenant/phone-numbers", {
-      auth: true
-    });
-  },
-  getUsers() {
-    return request<Record<string, unknown>>("/tenant/users", { auth: true });
-  },
-  inviteUser(payload: InviteUserPayload) {
-    return request<Record<string, unknown>>("/tenant/users", {
-      method: "POST",
-      auth: true,
-      body: payload
-    });
+  async getPhoneNumbers(): Promise<PhoneNumbersResponse> {
+    const data = await request<{ phone_numbers?: PhoneNumberApiRow[] }>(
+      "/tenant/phone-numbers",
+      { auth: true }
+    );
+    return {
+      phone_numbers: (data.phone_numbers ?? []).map(normalizePhoneNumber)
+    };
   },
   health() {
-    return request<Record<string, unknown>>("/tenant/health");
+    return request<HealthResponse>("/tenant/health");
   }
 };
-
-

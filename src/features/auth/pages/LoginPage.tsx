@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -11,6 +11,7 @@ import { authSession } from "@/shared/session/authSession";
 import { ApiError } from "@/shared/api/httpClient";
 
 export function LoginPage() {
+  const navigate = useNavigate();
   const [formMessage, setFormMessage] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const {
@@ -30,12 +31,42 @@ export function LoginPage() {
     setFormError(null);
     try {
       const response = await authApi.signIn(values);
-      authSession.setTokens({
-        accessToken: response.access_token,
-        refreshToken: response.refresh_token
-      });
-      setFormMessage("Sign in successful.");
+      
+      // Debug: Log the response structure
+      console.log("Sign in response:", response);
+      
+      if (response.session?.access_token) {
+        const accessToken = response.session.access_token.trim();
+        
+        // Validate JWT format (should have 3 parts separated by dots)
+        const tokenParts = accessToken.split(".");
+        if (tokenParts.length !== 3) {
+          console.error("Invalid token format. Token parts:", tokenParts.length);
+          setFormError(`Invalid token format received from server. Expected 3 parts, got ${tokenParts.length}.`);
+          return;
+        }
+        
+        // Store tokens
+        authSession.setTokens({
+          accessToken: accessToken,
+          refreshToken: response.session.refresh_token?.trim()
+        });
+        
+        // Verify token was stored correctly
+        const storedToken = authSession.getAccessToken();
+        if (!storedToken || storedToken !== accessToken) {
+          console.error("Token storage verification failed");
+          setFormError("Failed to store authentication token.");
+          return;
+        }
+        
+        navigate("/dashboard");
+      } else {
+        console.error("Response missing session or access_token:", response);
+        setFormError("Invalid response from server. Missing access token.");
+      }
     } catch (error) {
+      console.error("Sign in error:", error);
       const message =
         error instanceof ApiError ? error.message : "Unable to sign in.";
       setFormError(message);

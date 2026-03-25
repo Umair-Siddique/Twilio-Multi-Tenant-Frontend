@@ -53,12 +53,16 @@ export function SignUpPage() {
         default_email_recipients: defaultRecipients
       });
 
-      authSession.setTokens({
-        accessToken: response.access_token,
-        refreshToken: response.refresh_token
-      });
-      reset();
-      navigate("/auth/login");
+      if (response.session?.access_token) {
+        authSession.setTokens({
+          accessToken: response.session.access_token,
+          refreshToken: response.session.refresh_token
+        });
+        reset();
+        navigate("/auth/login");
+      } else {
+        setFormError("Invalid response from server. Missing access token.");
+      }
     } catch (error) {
       const message =
         error instanceof ApiError ? error.message : "Unable to create account.";

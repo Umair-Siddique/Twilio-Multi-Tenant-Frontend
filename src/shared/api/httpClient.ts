@@ -47,15 +47,33 @@ export async function request<T>(
   if (auth) {
     const token = authSession.getAccessToken();
     if (token) {
-      headers.Authorization = `Bearer ${token}`;
+      const trimmedToken = token.trim();
+      // Validate JWT format before sending
+      if (trimmedToken.split(".").length === 3) {
+        headers.Authorization = `Bearer ${trimmedToken}`;
+      } else {
+        throw new ApiError("Invalid access token format", 401, { error: "Token is malformed" });
+      }
+    } else {
+      throw new ApiError("Authorization token required", 401, { error: "No token available" });
     }
   }
 
-  const response = await fetch(joinUrl(appConfig.apiBaseUrl, path), {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined
-  });
+  let response: Response;
+  try {
+    response = await fetch(joinUrl(appConfig.apiBaseUrl, path), {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined
+    });
+  } catch (networkErr) {
+    // Network‑level failure (backend sleeping, DNS issue, CORS, offline, etc.)
+    throw new ApiError(
+      "Server is unreachable right now. Please wait a few seconds and try again.",
+      0,
+      { error: networkErr instanceof Error ? networkErr.message : "Network error" }
+    );
+  }
 
   const raw = await response.text();
   let payload: unknown = null;

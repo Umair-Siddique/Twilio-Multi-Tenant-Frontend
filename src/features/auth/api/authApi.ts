@@ -15,8 +15,24 @@ export type SignUpRequest = {
 };
 
 export type AuthResponse = {
-  access_token: string;
-  refresh_token?: string;
+  message?: string;
+  user?: {
+    id: string;
+    email: string;
+  };
+  tenant?: {
+    id: string;
+    name: string;
+    role: string;
+    timezone?: string;
+    industry?: string;
+    status?: string;
+  };
+  session: {
+    access_token: string;
+    refresh_token?: string;
+    expires_at?: number;
+  };
 };
 
 export type RefreshRequest = {
