@@ -10,6 +10,7 @@ import { DashboardPage } from "@/features/tenant/pages/DashboardPage";
 import { TenantProfilePage } from "@/features/tenant/pages/TenantProfilePage";
 import { AgentConfigPage } from "@/features/tenant/pages/AgentConfigPage";
 import { PhoneNumbersPage } from "@/features/tenant/pages/PhoneNumbersPage";
+import { IntegrationsPage } from "@/features/tenant/pages/IntegrationsPage";
 import { authSession } from "@/shared/session/authSession";
 
 function isAuthenticated(): boolean {
@@ -47,7 +48,8 @@ export const appRouter = createBrowserRouter([
           { index: true, element: <DashboardPage /> },
           { path: "profile", element: <TenantProfilePage /> },
           { path: "agent-config", element: <AgentConfigPage /> },
-          { path: "phone-numbers", element: <PhoneNumbersPage /> }
+          { path: "phone-numbers", element: <PhoneNumbersPage /> },
+          { path: "integrations", element: <IntegrationsPage /> }
         ]
       }
     ]
