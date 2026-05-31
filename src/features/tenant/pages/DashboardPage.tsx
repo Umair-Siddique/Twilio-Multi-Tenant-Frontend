@@ -84,37 +84,57 @@ export function DashboardPage() {
         return;
       }
 
-      try {
-        setLoading(true);
-        setError(null);
-        setIsSlow(false);
+      setLoading(true);
+      setError(null);
+      setIsSlow(false);
 
-        const [profileRes, configRes, numbersRes] = await Promise.all([
-          tenantApi.getProfile(signal),
-          tenantApi.getAgentConfig(signal),
-          tenantApi.getPhoneNumbers(signal)
-        ]);
+      const MAX_ATTEMPTS = 3;
+      const RETRY_DELAY_MS = 3000;
 
-        apiCache.set(CACHE_KEYS.tenantProfile,  profileRes);
-        apiCache.set(CACHE_KEYS.agentConfig,    configRes);
-        apiCache.set(CACHE_KEYS.phoneNumbers,   numbersRes);
+      for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+        if (signal.aborted) return;
 
-        setData({
-          profile:      profileRes,
-          agentConfig:  configRes,
-          phoneNumbers: numbersRes.phone_numbers
-        });
-      } catch (err) {
-        if (isAbortError(err)) return;
-        setError(
-          err instanceof ApiError
-            ? err.message
-            : "Dashboard request took too long. Please try again."
-        );
-      } finally {
-        // Guard prevents loading=false from landing while component is mid-abort,
-        // which would show the error fallback with config=null.
-        if (!signal.aborted) setLoading(false);
+        if (attempt > 0) {
+          // Wait before retrying; bail early if aborted during the pause
+          await new Promise<void>(resolve => {
+            const id = window.setTimeout(resolve, RETRY_DELAY_MS);
+            signal.addEventListener("abort", () => { clearTimeout(id); resolve(); }, { once: true });
+          });
+          if (signal.aborted) return;
+        }
+
+        try {
+          const [profileRes, configRes, numbersRes] = await Promise.all([
+            tenantApi.getProfile(signal),
+            tenantApi.getAgentConfig(signal),
+            tenantApi.getPhoneNumbers(signal)
+          ]);
+
+          apiCache.set(CACHE_KEYS.tenantProfile,  profileRes);
+          apiCache.set(CACHE_KEYS.agentConfig,    configRes);
+          apiCache.set(CACHE_KEYS.phoneNumbers,   numbersRes);
+
+          setData({
+            profile:      profileRes,
+            agentConfig:  configRes,
+            phoneNumbers: numbersRes.phone_numbers
+          });
+          if (!signal.aborted) setLoading(false);
+          return;
+        } catch (err) {
+          if (isAbortError(err)) return;
+
+          const isTransient = !(err instanceof ApiError) || err.status >= 500;
+          if (isTransient && attempt < MAX_ATTEMPTS - 1) {
+            // Show waking-up banner and retry silently
+            setIsSlow(true);
+            continue;
+          }
+
+          setError(err instanceof ApiError ? err.message : "Dashboard request took too long. Please try again.");
+          if (!signal.aborted) setLoading(false);
+          return;
+        }
       }
     };
 
@@ -142,7 +162,7 @@ export function DashboardPage() {
         </div>
         {isSlow && (
           <div className="form-status" style={{ marginBottom: 16 }}>
-            Backend is waking up or responding slowly. If this takes too long, try reloading the dashboard.
+            Backend is starting up — retrying automatically. This usually takes a few seconds.
           </div>
         )}
         <div className="stats-grid">
