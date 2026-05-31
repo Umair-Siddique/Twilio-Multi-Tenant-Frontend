@@ -38,21 +38,48 @@ export function SuperAdminDashboardPage() {
   const [data, setData] = useState<PageData>({ analytics: null, health: null });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isSlow, setIsSlow] = useState(false);
 
   const load = async (signal: AbortSignal) => {
-    try {
-      setLoading(true);
-      setError(null);
-      const [analytics, health] = await Promise.all([
-        superAdminApi.getAnalytics(signal),
-        superAdminApi.getHealth(signal)
-      ]);
-      setData({ analytics, health });
-    } catch (err) {
-      if (isAbortError(err)) return;
-      setError(err instanceof ApiError ? err.message : "Failed to load dashboard");
-    } finally {
-      if (!signal.aborted) setLoading(false);
+    setLoading(true);
+    setError(null);
+    setIsSlow(false);
+
+    const MAX_ATTEMPTS = 3;
+    const RETRY_DELAY_MS = 3000;
+
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      if (signal.aborted) return;
+
+      if (attempt > 0) {
+        await new Promise<void>(resolve => {
+          const id = window.setTimeout(resolve, RETRY_DELAY_MS);
+          signal.addEventListener("abort", () => { clearTimeout(id); resolve(); }, { once: true });
+        });
+        if (signal.aborted) return;
+      }
+
+      try {
+        const [analytics, health] = await Promise.all([
+          superAdminApi.getAnalytics(signal),
+          superAdminApi.getHealth(signal)
+        ]);
+        setData({ analytics, health });
+        if (!signal.aborted) setLoading(false);
+        return;
+      } catch (err) {
+        if (isAbortError(err)) return;
+
+        const isTransient = !(err instanceof ApiError) || err.status >= 500;
+        if (isTransient && attempt < MAX_ATTEMPTS - 1) {
+          setIsSlow(true);
+          continue;
+        }
+
+        setError(err instanceof ApiError ? err.message : "Failed to load dashboard");
+        if (!signal.aborted) setLoading(false);
+        return;
+      }
     }
   };
 
@@ -72,6 +99,11 @@ export function SuperAdminDashboardPage() {
             <div className="skeleton-block" style={{ width: 180, height: 18 }} />
           </div>
         </div>
+        {isSlow && (
+          <div className="form-status" style={{ marginBottom: 16 }}>
+            Backend is starting up — retrying automatically. This usually takes a few seconds.
+          </div>
+        )}
         <div className="stats-grid-4">
           {[...Array(4)].map((_, i) => <div key={i} className="skeleton-block skeleton-stat" />)}
         </div>
