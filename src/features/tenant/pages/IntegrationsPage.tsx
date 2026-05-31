@@ -54,7 +54,7 @@ const IconWarn = () => (
 );
 
 export function IntegrationsPage() {
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [, setSearchParams] = useSearchParams();
   const didInit = useRef(false);
 
   const [userRole, setUserRole] = useState<string | undefined>(undefined);

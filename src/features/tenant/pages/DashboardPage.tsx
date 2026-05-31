@@ -61,6 +61,7 @@ export function DashboardPage() {
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [loadTrigger, setLoadTrigger] = useState(0);
   const [isSlow, setIsSlow] = useState(false);
 
   useEffect(() => {
@@ -127,7 +128,8 @@ export function DashboardPage() {
       controller.abort();
       window.clearTimeout(slowTimer);
     };
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadTrigger]);
 
   if (loading) {
     return (
@@ -158,7 +160,7 @@ export function DashboardPage() {
       <div className="dashboard-page">
         <div className="page-hero"><h1>Dashboard</h1></div>
         <div className="form-status error" style={{ marginBottom: 12 }}>{error}</div>
-        <button type="button" onClick={() => void load()} className="dashboard-button">
+        <button type="button" onClick={() => setLoadTrigger(t => t + 1)} className="dashboard-button">
           Retry
         </button>
       </div>

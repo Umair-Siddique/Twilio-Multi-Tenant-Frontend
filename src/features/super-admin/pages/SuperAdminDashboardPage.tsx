@@ -88,7 +88,7 @@ export function SuperAdminDashboardPage() {
       <div className="dashboard-page">
         <div className="page-hero"><h1>Super Admin Dashboard</h1></div>
         <div className="form-status error" style={{ marginBottom: 16 }}>{error}</div>
-        <button className="dashboard-button" onClick={() => void load()}>Retry</button>
+        <button className="dashboard-button" onClick={() => { const ctrl = new AbortController(); void load(ctrl.signal); }}>Retry</button>
       </div>
     );
   }
