@@ -3,7 +3,8 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { tenantApi } from "@/features/tenant/api/tenantApi";
-import { ApiError } from "@/shared/api/httpClient";
+import { ApiError, isAbortError } from "@/shared/api/httpClient";
+import { apiCache, CACHE_KEYS } from "@/shared/cache/apiCache";
 import type { TenantProfileResponse, TenantProfilePayload } from "@/features/tenant/api/tenantApi";
 
 const profileSchema = z.object({
@@ -64,24 +65,45 @@ export function TenantProfilePage() {
   } = useForm<ProfileFormValues>({ resolver: zodResolver(profileSchema) });
 
   useEffect(() => {
+    const controller = new AbortController();
+    const { signal } = controller;
+
     const loadProfile = async () => {
+      // Return cached data immediately
+      const cached = apiCache.get(CACHE_KEYS.tenantProfile);
+      if (cached) {
+        reset({
+          name: cached.tenant.name,
+          timezone: cached.tenant.timezone,
+          industry: cached.tenant.industry,
+          default_email_recipients: cached.tenant.default_email_recipients.join(", ")
+        });
+        setProfile(cached);
+        setLoading(false);
+        return;
+      }
+
       try {
         setLoading(true);
-        const data = await tenantApi.getProfile();
-        setProfile(data);
+        const data = await tenantApi.getProfile(signal);
+        apiCache.set(CACHE_KEYS.tenantProfile, data);
         reset({
           name: data.tenant.name,
           timezone: data.tenant.timezone,
           industry: data.tenant.industry,
           default_email_recipients: data.tenant.default_email_recipients.join(", ")
         });
+        setProfile(data);
       } catch (err) {
+        if (isAbortError(err)) return;
         setFormError(err instanceof ApiError ? err.message : "Failed to load profile");
       } finally {
-        setLoading(false);
+        if (!signal.aborted) setLoading(false);
       }
     };
-    loadProfile();
+
+    void loadProfile();
+    return () => controller.abort();
   }, [reset]);
 
   const onSubmit = async (values: ProfileFormValues) => {
@@ -97,7 +119,10 @@ export function TenantProfilePage() {
           .split(",").map((e) => e.trim()).filter(Boolean)
       };
       const response = await tenantApi.updateProfile(payload);
-      setProfile({ ...profile!, tenant: response.tenant });
+      const updated = { ...profile!, tenant: response.tenant };
+      apiCache.set(CACHE_KEYS.tenantProfile, updated);
+      apiCache.delete(CACHE_KEYS.phoneNumbers); // dashboard re-reads profile
+      setProfile(updated);
       setFormMessage("Profile updated successfully");
       setIsEditing(false);
     } catch (err) {

@@ -27,7 +27,6 @@ export function SignUpPage() {
       companyName: "",
       timezone: "America/Toronto",
       industry: "",
-      defaultRecipients: "",
       email: "",
       password: "",
       confirmPassword: ""
@@ -37,20 +36,12 @@ export function SignUpPage() {
   const onSubmit = async (values: SignUpFormValues) => {
     setFormError(null);
     try {
-      const defaultRecipients = values.defaultRecipients
-        ? values.defaultRecipients
-            .split(",")
-            .map((value) => value.trim())
-            .filter(Boolean)
-        : [values.email];
-
       const response = await authApi.signUp({
         email: values.email,
         password: values.password,
         company_name: values.companyName,
         timezone: values.timezone,
-        industry: values.industry,
-        default_email_recipients: defaultRecipients
+        industry: values.industry
       });
 
       if (response.session?.access_token) {
@@ -112,13 +103,6 @@ export function SignUpPage() {
           autoComplete="email"
           error={errors.email?.message}
           {...register("email")}
-        />
-        <FormField
-          id="defaultRecipients"
-          label="Default Report Recipients (comma separated)"
-          placeholder="admin@company.com, support@company.com"
-          error={errors.defaultRecipients?.message}
-          {...register("defaultRecipients")}
         />
         <FormField
           id="password"

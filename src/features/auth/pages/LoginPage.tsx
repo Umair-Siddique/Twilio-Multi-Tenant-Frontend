@@ -46,12 +46,13 @@ export function LoginPage() {
           return;
         }
         
-        // Store tokens
+        // Store tokens and role
         authSession.setTokens({
           accessToken: accessToken,
-          refreshToken: response.session.refresh_token?.trim()
+          refreshToken: response.session.refresh_token?.trim(),
+          isSuperAdmin: response.user?.is_super_admin === true
         });
-        
+
         // Verify token was stored correctly
         const storedToken = authSession.getAccessToken();
         if (!storedToken || storedToken !== accessToken) {
@@ -59,8 +60,8 @@ export function LoginPage() {
           setFormError("Failed to store authentication token.");
           return;
         }
-        
-        navigate("/dashboard");
+
+        navigate(response.user?.is_super_admin === true ? "/super-admin" : "/dashboard");
       } else {
         console.error("Response missing session or access_token:", response);
         setFormError("Invalid response from server. Missing access token.");
@@ -77,11 +78,6 @@ export function LoginPage() {
     <AuthCard
       title="Welcome Back"
       subtitle="Sign in to continue to your account."
-      footer={
-        <p>
-          New here? <Link to="/auth/signup">Create account</Link>
-        </p>
-      }
     >
       <form onSubmit={handleSubmit(onSubmit)} className="auth-form">
         {formMessage ? <p className="form-status">{formMessage}</p> : null}

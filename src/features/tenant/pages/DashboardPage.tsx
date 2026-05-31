@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { tenantApi } from "@/features/tenant/api/tenantApi";
-import { ApiError } from "@/shared/api/httpClient";
+import { ApiError, isAbortError } from "@/shared/api/httpClient";
+import { apiCache, CACHE_KEYS } from "@/shared/cache/apiCache";
 import type {
   TenantProfileResponse,
   AgentConfig,
@@ -62,58 +63,70 @@ export function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [isSlow, setIsSlow] = useState(false);
 
-  const load = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      setIsSlow(false);
-
-      const [profileRes, configRes, numbersRes] = await Promise.all([
-        tenantApi.getProfile().catch((err) => {
-          throw err;
-        }),
-        tenantApi.getAgentConfig().catch((err) => {
-          throw err;
-        }),
-        tenantApi.getPhoneNumbers().catch((err) => {
-          throw err;
-        })
-      ]);
-
-      setData({
-        profile: profileRes,
-        agentConfig: configRes,
-        phoneNumbers: numbersRes.phone_numbers
-      });
-    } catch (err) {
-      const message =
-        err instanceof ApiError
-          ? err.message
-          : "Dashboard request took too long. Please try again.";
-      setError(message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    let slowTimer: number | undefined;
+    const controller = new AbortController();
+    const { signal } = controller;
 
-    if (loading) {
-      // If initial load takes longer than 5s, mark as slow so we can hint to the user.
-      slowTimer = window.setTimeout(() => {
-        setIsSlow(true);
-      }, 5000);
-    }
+    const load = async () => {
+      // Return cached data immediately — no loading flash on back-navigation
+      const cachedProfile  = apiCache.get(CACHE_KEYS.tenantProfile);
+      const cachedConfig   = apiCache.get(CACHE_KEYS.agentConfig);
+      const cachedNumbers  = apiCache.get(CACHE_KEYS.phoneNumbers);
+
+      if (cachedProfile && cachedConfig && cachedNumbers) {
+        setData({
+          profile:      cachedProfile,
+          agentConfig:  cachedConfig,
+          phoneNumbers: cachedNumbers.phone_numbers
+        });
+        setLoading(false);
+        return;
+      }
+
+      try {
+        setLoading(true);
+        setError(null);
+        setIsSlow(false);
+
+        const [profileRes, configRes, numbersRes] = await Promise.all([
+          tenantApi.getProfile(signal),
+          tenantApi.getAgentConfig(signal),
+          tenantApi.getPhoneNumbers(signal)
+        ]);
+
+        apiCache.set(CACHE_KEYS.tenantProfile,  profileRes);
+        apiCache.set(CACHE_KEYS.agentConfig,    configRes);
+        apiCache.set(CACHE_KEYS.phoneNumbers,   numbersRes);
+
+        setData({
+          profile:      profileRes,
+          agentConfig:  configRes,
+          phoneNumbers: numbersRes.phone_numbers
+        });
+      } catch (err) {
+        if (isAbortError(err)) return;
+        setError(
+          err instanceof ApiError
+            ? err.message
+            : "Dashboard request took too long. Please try again."
+        );
+      } finally {
+        // Guard prevents loading=false from landing while component is mid-abort,
+        // which would show the error fallback with config=null.
+        if (!signal.aborted) setLoading(false);
+      }
+    };
+
+    const slowTimer = window.setTimeout(() => {
+      if (!signal.aborted) setIsSlow(true);
+    }, 5000);
 
     void load();
 
     return () => {
-      if (slowTimer) {
-        window.clearTimeout(slowTimer);
-      }
+      controller.abort();
+      window.clearTimeout(slowTimer);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (loading) {

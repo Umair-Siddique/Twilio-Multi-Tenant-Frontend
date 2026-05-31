@@ -11,6 +11,13 @@ import { TenantProfilePage } from "@/features/tenant/pages/TenantProfilePage";
 import { AgentConfigPage } from "@/features/tenant/pages/AgentConfigPage";
 import { PhoneNumbersPage } from "@/features/tenant/pages/PhoneNumbersPage";
 import { IntegrationsPage } from "@/features/tenant/pages/IntegrationsPage";
+import { SuperAdminLayout } from "@/features/super-admin/layout/SuperAdminLayout";
+import { SuperAdminDashboardPage } from "@/features/super-admin/pages/SuperAdminDashboardPage";
+import { TenantsPage } from "@/features/super-admin/pages/TenantsPage";
+import { TenantDetailPage } from "@/features/super-admin/pages/TenantDetailPage";
+import { TwilioNumbersPage } from "@/features/super-admin/pages/TwilioNumbersPage";
+import { MonitoringPage } from "@/features/super-admin/pages/MonitoringPage";
+import { SuperAdminsPage } from "@/features/super-admin/pages/SuperAdminsPage";
 import { authSession } from "@/shared/session/authSession";
 
 function isAuthenticated(): boolean {
@@ -18,14 +25,29 @@ function isAuthenticated(): boolean {
   return !!token && token.trim().length > 0;
 }
 
+function defaultRoute(): string {
+  if (!isAuthenticated()) return "/auth/login";
+  return authSession.isSuperAdmin() ? "/super-admin" : "/dashboard";
+}
+
 function RequireAuth() {
   return isAuthenticated() ? <Outlet /> : <Navigate to="/auth/login" replace />;
+}
+
+function RequireSuperAdmin() {
+  if (!isAuthenticated()) return <Navigate to="/auth/login" replace />;
+  if (!authSession.isSuperAdmin()) return <Navigate to="/dashboard" replace />;
+  return <Outlet />;
+}
+
+function DefaultRedirect() {
+  return <Navigate to={defaultRoute()} replace />;
 }
 
 export const appRouter = createBrowserRouter([
   {
     path: "/",
-    element: <Navigate to={isAuthenticated() ? "/dashboard" : "/auth/login"} replace />
+    element: <DefaultRedirect />
   },
   {
     path: "/auth",
@@ -55,8 +77,25 @@ export const appRouter = createBrowserRouter([
     ]
   },
   {
+    path: "/super-admin",
+    element: <RequireSuperAdmin />,
+    children: [
+      {
+        element: <SuperAdminLayout />,
+        children: [
+          { index: true, element: <SuperAdminDashboardPage /> },
+          { path: "tenants", element: <TenantsPage /> },
+          { path: "tenants/:tenantId", element: <TenantDetailPage /> },
+          { path: "twilio", element: <TwilioNumbersPage /> },
+          { path: "monitoring", element: <MonitoringPage /> },
+          { path: "admins", element: <SuperAdminsPage /> }
+        ]
+      }
+    ]
+  },
+  {
     path: "*",
-    element: <Navigate to={isAuthenticated() ? "/dashboard" : "/auth/login"} replace />
+    element: <DefaultRedirect />
   }
 ]);
 

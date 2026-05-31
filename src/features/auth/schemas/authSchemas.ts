@@ -13,7 +13,6 @@ export const signUpSchema = z
     companyName: z.string().min(2, "Company name is required."),
     timezone: z.string().min(2, "Timezone is required."),
     industry: z.string().min(2, "Industry is required."),
-    defaultRecipients: z.string().optional(),
     email: z.string().email("Enter a valid email address."),
     password: z
       .string()

@@ -11,7 +11,6 @@ export type SignUpRequest = {
   company_name: string;
   timezone: string;
   industry: string;
-  default_email_recipients: string[];
 };
 
 export type AuthResponse = {
@@ -19,6 +18,7 @@ export type AuthResponse = {
   user?: {
     id: string;
     email: string;
+    is_super_admin?: boolean;
   };
   tenant?: {
     id: string;

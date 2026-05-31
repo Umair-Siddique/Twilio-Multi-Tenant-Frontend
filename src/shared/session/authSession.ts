@@ -1,10 +1,12 @@
 export type AuthTokens = {
   accessToken: string;
   refreshToken?: string;
+  isSuperAdmin?: boolean;
 };
 
-const ACCESS_TOKEN_KEY = "auth.access_token";
+const ACCESS_TOKEN_KEY  = "auth.access_token";
 const REFRESH_TOKEN_KEY = "auth.refresh_token";
+const SUPER_ADMIN_KEY   = "auth.is_super_admin";
 
 export const authSession = {
   getAccessToken(): string | null {
@@ -13,15 +15,20 @@ export const authSession = {
   getRefreshToken(): string | null {
     return window.localStorage.getItem(REFRESH_TOKEN_KEY);
   },
+  isSuperAdmin(): boolean {
+    return window.localStorage.getItem(SUPER_ADMIN_KEY) === "true";
+  },
   setTokens(tokens: AuthTokens): void {
     window.localStorage.setItem(ACCESS_TOKEN_KEY, tokens.accessToken);
     if (tokens.refreshToken) {
       window.localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refreshToken);
     }
+    window.localStorage.setItem(SUPER_ADMIN_KEY, tokens.isSuperAdmin ? "true" : "false");
   },
   clear(): void {
     window.localStorage.removeItem(ACCESS_TOKEN_KEY);
     window.localStorage.removeItem(REFRESH_TOKEN_KEY);
+    window.localStorage.removeItem(SUPER_ADMIN_KEY);
   }
 };
 

@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { tenantApi } from "@/features/tenant/api/tenantApi";
-import { ApiError } from "@/shared/api/httpClient";
-import type { AgentConfig, AgentConfigPayload } from "@/features/tenant/api/tenantApi";
+import { ApiError, isAbortError } from "@/shared/api/httpClient";
+import { apiCache, CACHE_KEYS } from "@/shared/cache/apiCache";
+import type { AgentConfig, AgentConfigPayload, Voice } from "@/features/tenant/api/tenantApi";
 import { agentConfigSchema, type AgentConfigFormValues } from "@/features/tenant/schemas/tenantSchemas";
 
 const TONES = [
@@ -53,6 +54,16 @@ const IconInfo = () => (
     <line x1="12" y1="16" x2="12.01" y2="16" />
   </svg>
 );
+const IconPlay = () => (
+  <svg viewBox="0 0 24 24" fill="currentColor" stroke="none" style={{ width: 12, height: 12, marginLeft: 2 }}>
+    <path d="M8 5v14l11-7z" />
+  </svg>
+);
+const IconStop = () => (
+  <svg viewBox="0 0 24 24" fill="currentColor" stroke="none" style={{ width: 10, height: 10 }}>
+    <rect x="6" y="6" width="12" height="12" />
+  </svg>
+);
 
 export function AgentConfigPage() {
   const [config, setConfig] = useState<AgentConfig | null>(null);
@@ -61,6 +72,15 @@ export function AgentConfigPage() {
   const [formMessage, setFormMessage] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
+
+  const [voices, setVoices] = useState<Voice[]>([]);
+  const [currentVoice, setCurrentVoice] = useState<Voice | null>(null);
+  const [selectedVoiceId, setSelectedVoiceId] = useState<string | null>(null);
+  const [voicesLoading, setVoicesLoading] = useState(true);
+  const [previewingVoiceId, setPreviewingVoiceId] = useState<string | null>(null);
+  const [previewLoadingId, setPreviewLoadingId] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const previewUrlRef = useRef<string | null>(null);
 
   const {
     register,
@@ -74,42 +94,135 @@ export function AgentConfigPage() {
   const watchRecordings  = watch("store_recordings");
 
   useEffect(() => {
-    const loadConfig = async () => {
+    const controller = new AbortController();
+    const { signal } = controller;
+
+    const loadAll = async () => {
+      // Return cached data immediately — avoids re-fetch on back-navigation
+      const cachedConfig  = apiCache.get(CACHE_KEYS.agentConfig);
+      const cachedVoices  = apiCache.get(CACHE_KEYS.voices);
+      const cachedVoiceSel = apiCache.get(CACHE_KEYS.voiceSelection);
+
+      if (cachedConfig && cachedVoices && cachedVoiceSel) {
+        reset({
+          greeting:          typeof cachedConfig.greeting === "string" ? cachedConfig.greeting : "",
+          system_prompt:     typeof cachedConfig.system_prompt === "string" ? cachedConfig.system_prompt : "",
+          tone:              typeof cachedConfig.tone === "string" ? cachedConfig.tone : "",
+          store_transcripts: cachedConfig.store_transcripts ?? true,
+          store_recordings:  cachedConfig.store_recordings ?? true,
+          retention_days:    typeof cachedConfig.retention_days === "number" && !Number.isNaN(cachedConfig.retention_days) ? cachedConfig.retention_days : 90
+        });
+        setConfig(cachedConfig);
+        setVoices(cachedVoices.voices);
+        setCurrentVoice(cachedVoiceSel.voice ?? null);
+        setSelectedVoiceId(cachedVoiceSel.voice?.id ?? null);
+        setLoading(false);
+        setVoicesLoading(false);
+        return;
+      }
+
       try {
         setLoading(true);
-        const data = await tenantApi.getAgentConfig();
-        setConfig(data);
+        const [data, voicesData, voiceSelection] = await Promise.all([
+          tenantApi.getAgentConfig(signal),
+          tenantApi.getVoices(signal),
+          tenantApi.getVoiceSelection(signal)
+        ]);
+
+        apiCache.set(CACHE_KEYS.agentConfig,    data);
+        apiCache.set(CACHE_KEYS.voices,         voicesData);
+        apiCache.set(CACHE_KEYS.voiceSelection, voiceSelection);
+
         reset({
-          greeting:        typeof data.greeting === "string" ? data.greeting : "",
-          system_prompt:   typeof data.system_prompt === "string" ? data.system_prompt : "",
+          greeting:          typeof data.greeting === "string" ? data.greeting : "",
+          system_prompt:     typeof data.system_prompt === "string" ? data.system_prompt : "",
           tone:              typeof data.tone === "string" ? data.tone : "",
           store_transcripts: data.store_transcripts ?? true,
           store_recordings:  data.store_recordings ?? true,
           retention_days:    typeof data.retention_days === "number" && !Number.isNaN(data.retention_days) ? data.retention_days : 90
         });
+        setConfig(data);
+        setVoices(voicesData.voices);
+        setCurrentVoice(voiceSelection.voice ?? null);
+        setSelectedVoiceId(voiceSelection.voice?.id ?? null);
       } catch (err) {
+        if (isAbortError(err)) return;
         setFormError(err instanceof ApiError ? err.message : "Failed to load agent config");
       } finally {
-        setLoading(false);
+        // Guard: don't set loading=false when aborted — prevents the !config error
+        // fallback from flashing while the component is mid-abort (React StrictMode).
+        if (!signal.aborted) {
+          setLoading(false);
+          setVoicesLoading(false);
+        }
       }
     };
-    loadConfig();
+
+    void loadAll();
+    return () => controller.abort();
   }, [reset]);
+
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) audioRef.current.pause();
+      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+    };
+  }, []);
+
+  const stopPreview = () => {
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
+    if (previewUrlRef.current) { URL.revokeObjectURL(previewUrlRef.current); previewUrlRef.current = null; }
+    setPreviewingVoiceId(null);
+  };
+
+  const handlePreview = async (voiceId: string) => {
+    stopPreview();
+    if (previewingVoiceId === voiceId) return;
+    setPreviewLoadingId(voiceId);
+    try {
+      const url = await tenantApi.previewVoice(voiceId);
+      previewUrlRef.current = url;
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      setPreviewingVoiceId(voiceId);
+      await audio.play();
+      audio.onended = () => {
+        setPreviewingVoiceId(null);
+        if (previewUrlRef.current === url) {
+          URL.revokeObjectURL(url);
+          previewUrlRef.current = null;
+        }
+      };
+    } catch {
+      setPreviewingVoiceId(null);
+    } finally {
+      setPreviewLoadingId(null);
+    }
+  };
 
   const onSubmit = async (values: AgentConfigFormValues) => {
     setFormMessage(null);
     setFormError(null);
     setSaving(true);
     try {
+      if (selectedVoiceId && selectedVoiceId !== currentVoice?.id) {
+        const voiceResult = await tenantApi.setVoiceSelection(selectedVoiceId);
+        const newVoice = voiceResult.voice;
+        setCurrentVoice(newVoice);
+        // Update voice selection cache
+        apiCache.set(CACHE_KEYS.voiceSelection, { voice: newVoice });
+      }
       const payload: AgentConfigPayload = {
         greeting:          values.greeting,
-        system_prompt:   values.system_prompt,
+        system_prompt:     values.system_prompt,
         tone:              values.tone,
         store_transcripts: values.store_transcripts,
         store_recordings:  values.store_recordings,
         retention_days:    values.retention_days
       };
       const response = await tenantApi.updateAgentConfig(payload);
+      // Update cache with saved config so dashboard reflects changes
+      apiCache.set(CACHE_KEYS.agentConfig, response.config);
       setConfig(response.config);
       setFormMessage("Agent configuration saved successfully");
       setIsEditing(false);
@@ -125,6 +238,8 @@ export function AgentConfigPage() {
     setIsEditing(false);
     setFormMessage(null);
     setFormError(null);
+    setSelectedVoiceId(currentVoice?.id ?? null);
+    stopPreview();
     reset({
       greeting:          typeof config.greeting === "string" ? config.greeting : "",
       system_prompt:     typeof config.system_prompt === "string" ? config.system_prompt : "",
@@ -193,6 +308,82 @@ export function AgentConfigPage() {
             </div>
             <div className="detail-card-body">
               <div className="detail-grid">
+                <div className="detail-item" style={{ gridColumn: "1 / -1" }}>
+                  <span className="detail-label">Available Voices</span>
+                  {voicesLoading ? (
+                    <span style={{ color: "var(--text-muted)", fontStyle: "italic", fontSize: "0.875rem" }}>Loading voices…</span>
+                  ) : voices.length === 0 ? (
+                    <span className="detail-value-muted" style={{ fontStyle: "italic" }}>No voices available</span>
+                  ) : (
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10, marginTop: 8 }}>
+                      {voices.map((voice) => {
+                        const isSelected = currentVoice?.id === voice.id;
+                        const isPreviewing = previewingVoiceId === voice.id;
+                        const isLoadingPreview = previewLoadingId === voice.id;
+                        return (
+                          <div
+                            key={voice.id}
+                            style={{
+                              border: `1.5px solid ${isSelected ? "var(--brand-blue)" : "var(--border)"}`,
+                              borderRadius: "var(--radius-md)",
+                              padding: "12px 14px",
+                              background: isSelected ? "var(--brand-blue-light)" : "var(--surface)",
+                            }}
+                          >
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                              <div>
+                                <div style={{ fontWeight: 700, fontSize: "0.9rem", color: "var(--text-primary)", marginBottom: 6 }}>
+                                  {voice.name}
+                                  {isSelected && (
+                                    <span className="badge badge-success" style={{ fontSize: "0.7rem", marginLeft: 6 }}>Active</span>
+                                  )}
+                                </div>
+                                <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                                  <span className="badge badge-info" style={{ fontSize: "0.72rem" }}>{voice.provider}</span>
+                                  <span className="badge badge-neutral" style={{ fontSize: "0.72rem", textTransform: "capitalize" }}>{voice.gender}</span>
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handlePreview(voice.id)}
+                                disabled={isLoadingPreview}
+                                title={isPreviewing ? "Stop preview" : "Preview voice"}
+                                style={{
+                                  width: 32,
+                                  height: 32,
+                                  border: "1px solid var(--border-mid)",
+                                  borderRadius: "50%",
+                                  background: isPreviewing ? "var(--brand-blue)" : "var(--surface)",
+                                  color: isPreviewing ? "#fff" : "var(--text-secondary)",
+                                  cursor: isLoadingPreview ? "wait" : "pointer",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  flexShrink: 0,
+                                  padding: 0,
+                                  transition: "background 0.15s, color 0.15s",
+                                }}
+                              >
+                                {isLoadingPreview ? (
+                                  <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)" }}>…</span>
+                                ) : isPreviewing ? (
+                                  <IconStop />
+                                ) : (
+                                  <IconPlay />
+                                )}
+                              </button>
+                            </div>
+                            {voice.description && (
+                              <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", marginTop: 8 }}>
+                                {voice.description}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
                 <div className="detail-item">
                   <span className="detail-label">Tone</span>
                   <span className="detail-value">
@@ -321,6 +512,85 @@ export function AgentConfigPage() {
                 <p className="form-section-desc">Define how your AI agent sounds and introduces itself</p>
               </div>
               <div className="form-section-body form-grid-2">
+                {/* Voice Picker */}
+                <div className="form-field" style={{ gridColumn: "1 / -1" }}>
+                  <label>Agent Voice</label>
+                  <small style={{ fontSize: "0.8rem", color: "var(--text-muted)", display: "block", marginBottom: 10 }}>
+                    Select the voice your agent uses when speaking to callers. Click the play button to preview.
+                  </small>
+                  {voicesLoading ? (
+                    <div style={{ padding: "16px 0", color: "var(--text-muted)", fontSize: "0.875rem" }}>Loading voices…</div>
+                  ) : voices.length === 0 ? (
+                    <div style={{ padding: "16px 0", color: "var(--text-muted)", fontSize: "0.875rem" }}>No voices available</div>
+                  ) : (
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }}>
+                      {voices.map((voice) => {
+                        const isSelected = selectedVoiceId === voice.id;
+                        const isPreviewing = previewingVoiceId === voice.id;
+                        const isLoadingPreview = previewLoadingId === voice.id;
+                        return (
+                          <div
+                            key={voice.id}
+                            onClick={() => setSelectedVoiceId(voice.id)}
+                            style={{
+                              border: `1.5px solid ${isSelected ? "var(--brand-blue)" : "var(--border)"}`,
+                              borderRadius: "var(--radius-md)",
+                              padding: "12px 14px",
+                              cursor: "pointer",
+                              background: isSelected ? "var(--brand-blue-light)" : "var(--surface)",
+                              transition: "border-color 0.15s, background 0.15s",
+                            }}
+                          >
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                              <div>
+                                <div style={{ fontWeight: 700, fontSize: "0.9rem", color: "var(--text-primary)", marginBottom: 6 }}>
+                                  {voice.name}
+                                </div>
+                                <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                                  <span className="badge badge-info" style={{ fontSize: "0.72rem" }}>{voice.provider}</span>
+                                  <span className="badge badge-neutral" style={{ fontSize: "0.72rem", textTransform: "capitalize" }}>{voice.gender}</span>
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); handlePreview(voice.id); }}
+                                disabled={isLoadingPreview}
+                                title={isPreviewing ? "Stop preview" : "Preview voice"}
+                                style={{
+                                  width: 32,
+                                  height: 32,
+                                  border: "1px solid var(--border-mid)",
+                                  borderRadius: "50%",
+                                  background: isPreviewing ? "var(--brand-blue)" : "var(--surface)",
+                                  color: isPreviewing ? "#fff" : "var(--text-secondary)",
+                                  cursor: isLoadingPreview ? "wait" : "pointer",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  flexShrink: 0,
+                                  padding: 0,
+                                  transition: "background 0.15s, color 0.15s",
+                                }}
+                              >
+                                {isLoadingPreview ? (
+                                  <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)" }}>…</span>
+                                ) : isPreviewing ? (
+                                  <IconStop />
+                                ) : (
+                                  <IconPlay />
+                                )}
+                              </button>
+                            </div>
+                            <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", marginTop: 8 }}>
+                              {voice.description}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
                 <div className="form-field">
                   <label htmlFor="tone">Agent Tone</label>
                   <select id="tone" className="form-field-select" {...register("tone")}>

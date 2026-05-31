@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { tenantApi } from "@/features/tenant/api/tenantApi";
 import { twilioApi, type AvailableNumber } from "@/features/tenant/api/twilioApi";
-import { ApiError } from "@/shared/api/httpClient";
+import { ApiError, isAbortError } from "@/shared/api/httpClient";
+import { apiCache, CACHE_KEYS } from "@/shared/cache/apiCache";
 import type { PhoneNumber } from "@/features/tenant/api/tenantApi";
 
 const IconPhone = () => (
@@ -76,21 +77,40 @@ export function PhoneNumbersPage() {
   const [buyMessage, setBuyMessage] = useState<string | null>(null);
   const [buyError, setBuyError] = useState<string | null>(null);
 
-  const loadPhoneNumbers = async (isRefresh = false) => {
+  const loadPhoneNumbers = async (isRefresh = false, signal?: AbortSignal) => {
+    // On first load (not a manual refresh) return cache instantly
+    if (!isRefresh) {
+      const cached = apiCache.get(CACHE_KEYS.phoneNumbers);
+      if (cached) {
+        setPhoneNumbers(cached.phone_numbers ?? []);
+        setLoading(false);
+        return;
+      }
+    }
+
     try {
       isRefresh ? setRefreshing(true) : setLoading(true);
       setError(null);
-      const response = await tenantApi.getPhoneNumbers();
+      const response = await tenantApi.getPhoneNumbers(signal);
+      apiCache.set(CACHE_KEYS.phoneNumbers, response);
       setPhoneNumbers(response.phone_numbers ?? []);
     } catch (err) {
+      if (isAbortError(err)) return;
       setError(err instanceof ApiError ? err.message : "Failed to load phone numbers");
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (!signal?.aborted) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   };
 
-  useEffect(() => { loadPhoneNumbers(); }, []);
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadPhoneNumbers(false, controller.signal);
+    return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleSearchNumbers = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -124,6 +144,8 @@ export function PhoneNumbersPage() {
     try {
       await twilioApi.buyPhoneNumber({ phone_number, country: country || "CA" });
       setBuyMessage(`Successfully purchased ${phone_number}. It will now appear in your assigned numbers.`);
+      // Invalidate so dashboard and this page re-fetch fresh data
+      apiCache.delete(CACHE_KEYS.phoneNumbers);
       await loadPhoneNumbers(true);
     } catch (err) {
       setBuyError(

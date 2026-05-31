@@ -7,6 +7,7 @@ type RequestOptions = {
   method?: HttpMethod;
   body?: unknown;
   auth?: boolean;
+  signal?: AbortSignal;
 };
 
 export class ApiError extends Error {
@@ -18,6 +19,10 @@ export class ApiError extends Error {
     this.status = status;
     this.payload = payload;
   }
+}
+
+export function isAbortError(err: unknown): boolean {
+  return err instanceof DOMException && err.name === "AbortError";
 }
 
 function joinUrl(baseUrl: string, path: string): string {
@@ -36,9 +41,23 @@ function getErrorMessage(payload: unknown): string {
   return "Something went wrong. Please try again.";
 }
 
+// Merge a caller-supplied signal with a timeout signal so either can abort the request.
+function mergeSignals(callerSignal: AbortSignal | undefined, timeoutSignal: AbortSignal): AbortSignal {
+  if (!callerSignal) return timeoutSignal;
+  const controller = new AbortController();
+  const abort = (reason?: unknown) => controller.abort(reason);
+  if (callerSignal.aborted) { abort(callerSignal.reason); return controller.signal; }
+  if (timeoutSignal.aborted) { abort(timeoutSignal.reason); return controller.signal; }
+  callerSignal.addEventListener("abort", () => abort(callerSignal.reason), { once: true });
+  timeoutSignal.addEventListener("abort", () => abort(timeoutSignal.reason), { once: true });
+  return controller.signal;
+}
+
+const REQUEST_TIMEOUT_MS = 15_000;
+
 export async function request<T>(
   path: string,
-  { method = "GET", body, auth = false }: RequestOptions = {}
+  { method = "GET", body, auth = false, signal }: RequestOptions = {}
 ): Promise<T> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json"
@@ -59,21 +78,29 @@ export async function request<T>(
     }
   }
 
+  const timeoutController = new AbortController();
+  const timeoutId = setTimeout(() => timeoutController.abort(), REQUEST_TIMEOUT_MS);
+  const combinedSignal = mergeSignals(signal, timeoutController.signal);
+
   let response: Response;
   try {
     response = await fetch(joinUrl(appConfig.apiBaseUrl, path), {
       method,
       headers,
-      body: body ? JSON.stringify(body) : undefined
+      body: body ? JSON.stringify(body) : undefined,
+      signal: combinedSignal
     });
   } catch (networkErr) {
-    // Network‑level failure (backend sleeping, DNS issue, CORS, offline, etc.)
+    clearTimeout(timeoutId);
+    // Re-throw AbortError so callers can distinguish cancellation from real failures
+    if (isAbortError(networkErr)) throw networkErr;
     throw new ApiError(
       "Server is unreachable right now. Please wait a few seconds and try again.",
       0,
       { error: networkErr instanceof Error ? networkErr.message : "Network error" }
     );
   }
+  clearTimeout(timeoutId);
 
   const raw = await response.text();
   let payload: unknown = null;
@@ -91,4 +118,3 @@ export async function request<T>(
 
   return payload as T;
 }
-

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { tenantApi } from "@/features/tenant/api/tenantApi";
 import {
@@ -6,7 +6,7 @@ import {
   type GoogleCalendarConnectionResponse
 } from "@/features/tenant/api/googleCalendarApi";
 import { hubspotApi, type HubspotConnectionResponse } from "@/features/tenant/api/hubspotApi";
-import { ApiError } from "@/shared/api/httpClient";
+import { ApiError, isAbortError } from "@/shared/api/httpClient";
 
 const MANAGER_ROLES = new Set(["owner", "admin"]);
 
@@ -45,8 +45,17 @@ const IconInfo = () => (
   </svg>
 );
 
+const IconWarn = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 14, height: 14 }}>
+    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+    <line x1="12" y1="9" x2="12" y2="13" />
+    <line x1="12" y1="17" x2="12.01" y2="17" />
+  </svg>
+);
+
 export function IntegrationsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const didInit = useRef(false);
 
   const [userRole, setUserRole] = useState<string | undefined>(undefined);
   const [googleConnection, setGoogleConnection] = useState<GoogleCalendarConnectionResponse | null>(null);
@@ -54,6 +63,8 @@ export function IntegrationsPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [gcStatusError, setGcStatusError] = useState<string | null>(null);
+  const [hsStatusError, setHsStatusError] = useState<string | null>(null);
 
   const [oauthBanner, setOauthBanner] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [googleConnecting, setGoogleConnecting] = useState(false);
@@ -67,55 +78,78 @@ export function IntegrationsPage() {
 
   const [actionError, setActionError] = useState<string | null>(null);
 
+  // Promise.allSettled — a single failing integration check never nukes the whole page.
+  // Only a profile failure (needed to determine role/permissions) surfaces as a global error.
   const loadAll = useCallback(async (isRefresh = false) => {
-    try {
-      isRefresh ? setRefreshing(true) : setLoading(true);
-      setLoadError(null);
-      const [profile, gc, hs] = await Promise.all([
-        tenantApi.getProfile(),
-        googleCalendarApi.getConnection(),
-        hubspotApi.getConnection()
-      ]);
-      setUserRole(profile.user_role);
-      setGoogleConnection(gc);
-      setHubspotConnection(hs);
-    } catch (err) {
-      setLoadError(err instanceof ApiError ? err.message : "Failed to load integrations");
-      setGoogleConnection(null);
-      setHubspotConnection(null);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
+    isRefresh ? setRefreshing(true) : setLoading(true);
+    setLoadError(null);
+    setGcStatusError(null);
+    setHsStatusError(null);
+
+    const [profileResult, gcResult, hsResult] = await Promise.allSettled([
+      tenantApi.getProfile(),
+      googleCalendarApi.getConnection(),
+      hubspotApi.getConnection()
+    ]);
+
+    // Profile is critical — determines permission level
+    if (profileResult.status === "fulfilled") {
+      setUserRole(profileResult.value.user_role);
+    } else if (!isAbortError(profileResult.reason)) {
+      const err = profileResult.reason;
+      setLoadError(err instanceof ApiError ? err.message : "Failed to load profile");
     }
+
+    // Integration checks — surface per-card errors; never clear previously good state
+    if (gcResult.status === "fulfilled") {
+      setGoogleConnection(gcResult.value);
+    } else if (!isAbortError(gcResult.reason)) {
+      const err = gcResult.reason;
+      setGcStatusError(err instanceof ApiError ? err.message : "Could not check Google Calendar status");
+    }
+
+    if (hsResult.status === "fulfilled") {
+      setHubspotConnection(hsResult.value);
+    } else if (!isAbortError(hsResult.reason)) {
+      const err = hsResult.reason;
+      setHsStatusError(err instanceof ApiError ? err.message : "Could not check HubSpot status");
+    }
+
+    setLoading(false);
+    setRefreshing(false);
   }, []);
 
+  // Single init effect — prevents the double-load race that occurred when both the
+  // "always load" effect and the "OAuth callback" effect fired concurrently on mount.
   useEffect(() => {
-    void loadAll(false);
-  }, [loadAll]);
+    if (didInit.current) return;
+    didInit.current = true;
 
-  useEffect(() => {
-    const integration = searchParams.get("integration");
-    const status = searchParams.get("status");
-    const reason = searchParams.get("reason");
-    if (integration !== "google_calendar" || !status) return;
+    // Read initial params before they're cleaned from the URL
+    const params = new URLSearchParams(window.location.search);
+    const integration = params.get("integration");
+    const status = params.get("status");
+    const reason = params.get("reason");
 
-    if (status === "connected") {
-      setOauthBanner({ type: "success", text: "Google Calendar connected successfully." });
-    } else if (status === "error") {
-      const decoded = reason ? decodeURIComponent(reason) : "";
-      setOauthBanner({
-        type: "error",
-        text: decoded ? `Google Calendar connection failed: ${decoded}` : "Google Calendar connection failed."
-      });
+    if (integration === "google_calendar" && status) {
+      if (status === "connected") {
+        setOauthBanner({ type: "success", text: "Google Calendar connected successfully." });
+      } else if (status === "error") {
+        const decoded = reason ? decodeURIComponent(reason) : "";
+        setOauthBanner({
+          type: "error",
+          text: decoded ? `Google Calendar connection failed: ${decoded}` : "Google Calendar connection failed."
+        });
+      }
+      setSearchParams(
+        p => { const n = new URLSearchParams(p); n.delete("integration"); n.delete("status"); n.delete("reason"); return n; },
+        { replace: true }
+      );
     }
 
-    const next = new URLSearchParams(searchParams);
-    next.delete("integration");
-    next.delete("status");
-    next.delete("reason");
-    setSearchParams(next, { replace: true });
-    void loadAll(true);
-  }, [searchParams, setSearchParams, loadAll]);
+    void loadAll(false);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleConnectGoogleCalendar = async () => {
     setActionError(null);
@@ -230,15 +264,12 @@ export function IntegrationsPage() {
         </button>
       </div>
 
-      {loadError ? <div className="form-status error" style={{ marginBottom: 16 }}>{loadError}</div> : null}
-      {oauthBanner?.type === "success" ? (
-        <div className="form-status" style={{ marginBottom: 16 }}>{oauthBanner.text}</div>
-      ) : null}
-      {oauthBanner?.type === "error" ? (
-        <div className="form-status error" style={{ marginBottom: 16 }}>{oauthBanner.text}</div>
-      ) : null}
-      {actionError ? <div className="form-status error" style={{ marginBottom: 16 }}>{actionError}</div> : null}
+      {loadError    ? <div className="form-status error" style={{ marginBottom: 16 }}>{loadError}</div> : null}
+      {oauthBanner?.type === "success" ? <div className="form-status"       style={{ marginBottom: 16 }}>{oauthBanner.text}</div> : null}
+      {oauthBanner?.type === "error"   ? <div className="form-status error" style={{ marginBottom: 16 }}>{oauthBanner.text}</div> : null}
+      {actionError  ? <div className="form-status error" style={{ marginBottom: 16 }}>{actionError}</div> : null}
 
+      {/* ── Google Calendar ── */}
       <div className="info-banner" style={{ marginBottom: 20 }}>
         <span className="info-banner-icon"><IconInfo /></span>
         <div className="info-banner-content">
@@ -252,15 +283,27 @@ export function IntegrationsPage() {
 
       <div className="detail-card" style={{ marginBottom: 20 }}>
         <div className="detail-card-header" style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ color: "var(--accent)", display: "inline-flex" }}><IconCalendar /></span>
+          <span style={{ color: "var(--brand-blue)", display: "inline-flex" }}><IconCalendar /></span>
           <h2 className="detail-card-title" style={{ margin: 0 }}>Google Calendar</h2>
         </div>
         <div className="detail-card-body">
+          {gcStatusError ? (
+            <div style={{
+              display: "flex", alignItems: "center", gap: 6,
+              padding: "8px 12px", marginBottom: 14,
+              background: "var(--warning-bg)", border: "1px solid var(--warning-ring)",
+              borderRadius: "var(--radius-md)", fontSize: "0.82rem", color: "var(--warning-text)"
+            }}>
+              <IconWarn /> Status check failed — {gcStatusError}
+            </div>
+          ) : null}
           <div className="detail-grid">
             <div className="detail-item">
               <span className="detail-label">Status</span>
               <span className="detail-value">
-                {gcConnected ? (
+                {gcStatusError ? (
+                  <span style={{ color: "var(--text-muted)", fontStyle: "italic" }}>Unknown</span>
+                ) : gcConnected ? (
                   <span style={{ color: "var(--success-text)" }}>Connected</span>
                 ) : (
                   <span style={{ color: "var(--text-muted)" }}>Not connected</span>
@@ -270,23 +313,19 @@ export function IntegrationsPage() {
             {gcConnected && gcIntegration?.connected_at ? (
               <div className="detail-item">
                 <span className="detail-label">Connected at</span>
-                <span className="detail-value">
-                  {new Date(gcIntegration.connected_at).toLocaleString()}
-                </span>
+                <span className="detail-value">{new Date(gcIntegration.connected_at).toLocaleString()}</span>
               </div>
             ) : null}
             {gcIntegration?.error_message ? (
               <div className="detail-item" style={{ gridColumn: "1 / -1" }}>
                 <span className="detail-label">Last error</span>
-                <span className="detail-value" style={{ color: "var(--error-text, #c0392b)" }}>
-                  {gcIntegration.error_message}
-                </span>
+                <span className="detail-value" style={{ color: "var(--error-text)" }}>{gcIntegration.error_message}</span>
               </div>
             ) : null}
           </div>
 
           <div style={{ marginTop: 20, display: "flex", flexWrap: "wrap", gap: 12 }}>
-            {gcConnected ? (
+            {!gcStatusError && gcConnected ? (
               <button
                 type="button"
                 className="dashboard-button-secondary"
@@ -295,7 +334,7 @@ export function IntegrationsPage() {
               >
                 {googleDisconnecting ? "Disconnecting…" : "Disconnect"}
               </button>
-            ) : (
+            ) : !gcStatusError ? (
               <button
                 type="button"
                 className="dashboard-button"
@@ -304,8 +343,8 @@ export function IntegrationsPage() {
               >
                 {googleConnecting ? "Redirecting…" : "Connect with Google"}
               </button>
-            )}
-            {!canManage ? (
+            ) : null}
+            {!canManage && !gcStatusError ? (
               <p className="page-subtitle" style={{ margin: 0, alignSelf: "center" }}>
                 Ask an owner or admin to manage this connection.
               </p>
@@ -314,6 +353,7 @@ export function IntegrationsPage() {
         </div>
       </div>
 
+      {/* ── HubSpot ── */}
       <div className="info-banner" style={{ marginBottom: 20 }}>
         <span className="info-banner-icon"><IconInfo /></span>
         <div className="info-banner-content">
@@ -327,18 +367,31 @@ export function IntegrationsPage() {
 
       <div className="detail-card">
         <div className="detail-card-header" style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ color: "var(--accent)", display: "inline-flex" }}><IconHubSpot /></span>
+          <span style={{ color: "var(--brand-blue)", display: "inline-flex" }}><IconHubSpot /></span>
           <h2 className="detail-card-title" style={{ margin: 0 }}>HubSpot</h2>
         </div>
         <div className="detail-card-body">
-          {hubspotMessage ? <div className="form-status" style={{ marginBottom: 12 }}>{hubspotMessage}</div> : null}
-          {hubspotError ? <div className="form-status error" style={{ marginBottom: 12 }}>{hubspotError}</div> : null}
+          {hubspotMessage ? <div className="form-status"       style={{ marginBottom: 12 }}>{hubspotMessage}</div> : null}
+          {hubspotError   ? <div className="form-status error" style={{ marginBottom: 12 }}>{hubspotError}</div>   : null}
+
+          {hsStatusError ? (
+            <div style={{
+              display: "flex", alignItems: "center", gap: 6,
+              padding: "8px 12px", marginBottom: 14,
+              background: "var(--warning-bg)", border: "1px solid var(--warning-ring)",
+              borderRadius: "var(--radius-md)", fontSize: "0.82rem", color: "var(--warning-text)"
+            }}>
+              <IconWarn /> Status check failed — {hsStatusError}
+            </div>
+          ) : null}
 
           <div className="detail-grid">
             <div className="detail-item">
               <span className="detail-label">Status</span>
               <span className="detail-value">
-                {hsConnected ? (
+                {hsStatusError ? (
+                  <span style={{ color: "var(--text-muted)", fontStyle: "italic" }}>Unknown</span>
+                ) : hsConnected ? (
                   <span style={{ color: "var(--success-text)" }}>Connected</span>
                 ) : (
                   <span style={{ color: "var(--text-muted)" }}>Not connected</span>
@@ -348,22 +401,18 @@ export function IntegrationsPage() {
             {hsConnected && hsIntegration?.connected_at ? (
               <div className="detail-item">
                 <span className="detail-label">Connected at</span>
-                <span className="detail-value">
-                  {new Date(hsIntegration.connected_at).toLocaleString()}
-                </span>
+                <span className="detail-value">{new Date(hsIntegration.connected_at).toLocaleString()}</span>
               </div>
             ) : null}
             {hsIntegration?.error_message ? (
               <div className="detail-item" style={{ gridColumn: "1 / -1" }}>
                 <span className="detail-label">Last error</span>
-                <span className="detail-value" style={{ color: "var(--error-text, #c0392b)" }}>
-                  {hsIntegration.error_message}
-                </span>
+                <span className="detail-value" style={{ color: "var(--error-text)" }}>{hsIntegration.error_message}</span>
               </div>
             ) : null}
           </div>
 
-          {!hsConnected && canManage ? (
+          {!hsStatusError && !hsConnected && canManage ? (
             <form onSubmit={handleConnectHubspot} className="dashboard-form" style={{ marginTop: 20, maxWidth: 480 }}>
               <div className="form-field">
                 <label htmlFor="hubspot-access-token">Access token</label>
@@ -384,13 +433,13 @@ export function IntegrationsPage() {
             </form>
           ) : null}
 
-          {!hsConnected && !canManage ? (
+          {!hsStatusError && !hsConnected && !canManage ? (
             <p className="page-subtitle" style={{ marginTop: 16 }}>
               Ask an owner or admin to connect HubSpot.
             </p>
           ) : null}
 
-          {hsConnected ? (
+          {!hsStatusError && hsConnected ? (
             <div style={{ marginTop: 20, display: "flex", flexWrap: "wrap", gap: 12 }}>
               <button
                 type="button"

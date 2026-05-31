@@ -1,4 +1,6 @@
-import { request } from "@/shared/api/httpClient";
+import { request, ApiError } from "@/shared/api/httpClient";
+import { appConfig } from "@/shared/config/appConfig";
+import { authSession } from "@/shared/session/authSession";
 
 // Tenant Profile Types
 export type Tenant = {
@@ -102,6 +104,29 @@ export type PhoneNumbersResponse = {
   phone_numbers: PhoneNumber[];
 };
 
+// Voice Types
+export type Voice = {
+  id: string;
+  name: string;
+  gender: "male" | "female";
+  language_code: string;
+  provider: string;
+  description: string;
+};
+
+export type VoicesResponse = {
+  voices: Voice[];
+};
+
+export type VoiceSelectionResponse = {
+  voice: Voice;
+};
+
+export type VoiceSelectionUpdateResponse = {
+  message: string;
+  voice: Voice;
+};
+
 // Health Check
 export type HealthResponse = {
   status: string;
@@ -109,8 +134,8 @@ export type HealthResponse = {
 };
 
 export const tenantApi = {
-  getProfile() {
-    return request<TenantProfileResponse>("/tenant/profile", { auth: true });
+  getProfile(signal?: AbortSignal) {
+    return request<TenantProfileResponse>("/tenant/profile", { auth: true, signal });
   },
   updateProfile(payload: TenantProfilePayload) {
     return request<TenantProfileUpdateResponse>("/tenant/profile", {
@@ -119,8 +144,8 @@ export const tenantApi = {
       body: payload
     });
   },
-  getAgentConfig() {
-    return request<AgentConfig>("/tenant/agent-config", { auth: true });
+  getAgentConfig(signal?: AbortSignal) {
+    return request<AgentConfig>("/tenant/agent-config", { auth: true, signal });
   },
   updateAgentConfig(payload: AgentConfigPayload) {
     return request<AgentConfigUpdateResponse>("/tenant/agent-config", {
@@ -129,14 +154,40 @@ export const tenantApi = {
       body: payload
     });
   },
-  async getPhoneNumbers(): Promise<PhoneNumbersResponse> {
+  async getPhoneNumbers(signal?: AbortSignal): Promise<PhoneNumbersResponse> {
     const data = await request<{ phone_numbers?: PhoneNumberApiRow[] }>(
       "/tenant/phone-numbers",
-      { auth: true }
+      { auth: true, signal }
     );
     return {
       phone_numbers: (data.phone_numbers ?? []).map(normalizePhoneNumber)
     };
+  },
+  getVoices(signal?: AbortSignal) {
+    return request<VoicesResponse>("/tenant/voices", { auth: true, signal });
+  },
+  async previewVoice(voiceId: string): Promise<string> {
+    const token = authSession.getAccessToken();
+    const headers: Record<string, string> = {};
+    if (token) {
+      const trimmed = token.trim();
+      if (trimmed.split(".").length === 3) headers.Authorization = `Bearer ${trimmed}`;
+    }
+    const base = appConfig.apiBaseUrl.replace(/\/+$/, "");
+    const res = await fetch(`${base}/tenant/voices/${encodeURIComponent(voiceId)}/preview`, { headers });
+    if (!res.ok) throw new ApiError("Voice preview not available", res.status, null);
+    const blob = await res.blob();
+    return URL.createObjectURL(blob);
+  },
+  getVoiceSelection(signal?: AbortSignal) {
+    return request<VoiceSelectionResponse>("/tenant/voice-selection", { auth: true, signal });
+  },
+  setVoiceSelection(voiceId: string) {
+    return request<VoiceSelectionUpdateResponse>("/tenant/voice-selection", {
+      method: "PUT",
+      auth: true,
+      body: { voice_id: voiceId }
+    });
   },
   health() {
     return request<HealthResponse>("/tenant/health");
