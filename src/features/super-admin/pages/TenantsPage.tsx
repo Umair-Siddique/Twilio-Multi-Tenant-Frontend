@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { superAdminApi } from "@/features/super-admin/api/superAdminApi";
 import { ApiError, isAbortError } from "@/shared/api/httpClient";
+import { withRetry } from "@/shared/utils/withRetry";
 import type { TenantSummary, CreateTenantPayload } from "@/features/super-admin/api/superAdminApi";
 
 const STATUSES = ["", "active", "suspended", "inactive"];
@@ -89,7 +90,7 @@ export function TenantsPage() {
     try {
       setLoading(true);
       setError(null);
-      const res = await superAdminApi.listTenants({ page: p, per_page: 100, ...f }, signal);
+      const res = await withRetry(() => superAdminApi.listTenants({ page: p, per_page: 100, ...f }, signal), signal);
       const rows = Array.isArray(res.tenants) ? res.tenants : [];
       setTenants(rows);
       const pg = res.pagination;

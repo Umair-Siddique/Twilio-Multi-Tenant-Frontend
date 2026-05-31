@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { superAdminApi } from "@/features/super-admin/api/superAdminApi";
 import { ApiError, isAbortError } from "@/shared/api/httpClient";
+import { withRetry } from "@/shared/utils/withRetry";
 import type { SuperAdmin } from "@/features/super-admin/api/superAdminApi";
 
 export function SuperAdminsPage() {
@@ -17,7 +18,7 @@ export function SuperAdminsPage() {
     try {
       setLoading(true);
       setError(null);
-      const res = await superAdminApi.listSuperAdmins(signal);
+      const res = await withRetry(() => superAdminApi.listSuperAdmins(signal), signal);
       setAdmins(res.super_admins);
     } catch (err) {
       if (isAbortError(err)) return;

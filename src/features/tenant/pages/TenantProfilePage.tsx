@@ -4,6 +4,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { tenantApi } from "@/features/tenant/api/tenantApi";
 import { ApiError, isAbortError } from "@/shared/api/httpClient";
+import { withRetry } from "@/shared/utils/withRetry";
 import { apiCache, CACHE_KEYS } from "@/shared/cache/apiCache";
 import type { TenantProfileResponse, TenantProfilePayload } from "@/features/tenant/api/tenantApi";
 
@@ -85,7 +86,7 @@ export function TenantProfilePage() {
 
       try {
         setLoading(true);
-        const data = await tenantApi.getProfile(signal);
+        const data = await withRetry(() => tenantApi.getProfile(signal), signal);
         apiCache.set(CACHE_KEYS.tenantProfile, data);
         reset({
           name: data.tenant.name,

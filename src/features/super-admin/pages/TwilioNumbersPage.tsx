@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { superAdminApi } from "@/features/super-admin/api/superAdminApi";
 import { ApiError, isAbortError } from "@/shared/api/httpClient";
+import { withRetry } from "@/shared/utils/withRetry";
 import type { PhoneNumberRecord, UnassignedNumber } from "@/features/super-admin/api/superAdminApi";
 
 type Tab = "all" | "unassigned";
@@ -236,7 +237,7 @@ export function TwilioNumbersPage() {
     try {
       setLoading(true);
       setError(null);
-      const res = await superAdminApi.listNumbers({ page: p, per_page: 20, enrich: true }, signal);
+      const res = await withRetry(() => superAdminApi.listNumbers({ page: p, per_page: 20, enrich: true }, signal), signal);
       setNumbers(res.numbers);
       setTotalPages(res.pagination.pages);
       setTotal(res.pagination.total);
@@ -252,7 +253,7 @@ export function TwilioNumbersPage() {
     try {
       setLoading(true);
       setError(null);
-      const res = await superAdminApi.listUnassignedNumbers(signal);
+      const res = await withRetry(() => superAdminApi.listUnassignedNumbers(signal), signal);
       setUnassigned(res.unassigned_numbers);
     } catch (err) {
       if (isAbortError(err)) return;

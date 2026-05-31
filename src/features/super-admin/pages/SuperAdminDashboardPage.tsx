@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { superAdminApi } from "@/features/super-admin/api/superAdminApi";
 import { ApiError, isAbortError } from "@/shared/api/httpClient";
+import { withRetry } from "@/shared/utils/withRetry";
 import type { AnalyticsResponse, HealthResponse } from "@/features/super-admin/api/superAdminApi";
 
 type PageData = { analytics: AnalyticsResponse | null; health: HealthResponse | null };
@@ -45,41 +46,17 @@ export function SuperAdminDashboardPage() {
     setError(null);
     setIsSlow(false);
 
-    const MAX_ATTEMPTS = 3;
-    const RETRY_DELAY_MS = 3000;
-
-    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-      if (signal.aborted) return;
-
-      if (attempt > 0) {
-        await new Promise<void>(resolve => {
-          const id = window.setTimeout(resolve, RETRY_DELAY_MS);
-          signal.addEventListener("abort", () => { clearTimeout(id); resolve(); }, { once: true });
-        });
-        if (signal.aborted) return;
-      }
-
-      try {
-        const [analytics, health] = await Promise.all([
-          superAdminApi.getAnalytics(signal),
-          superAdminApi.getHealth(signal)
-        ]);
-        setData({ analytics, health });
-        if (!signal.aborted) setLoading(false);
-        return;
-      } catch (err) {
-        if (isAbortError(err)) return;
-
-        const isTransient = !(err instanceof ApiError) || err.status >= 500;
-        if (isTransient && attempt < MAX_ATTEMPTS - 1) {
-          setIsSlow(true);
-          continue;
-        }
-
-        setError(err instanceof ApiError ? err.message : "Failed to load dashboard");
-        if (!signal.aborted) setLoading(false);
-        return;
-      }
+    try {
+      const [analytics, health] = await withRetry(() => Promise.all([
+        superAdminApi.getAnalytics(signal),
+        superAdminApi.getHealth(signal)
+      ]), signal, () => setIsSlow(true));
+      setData({ analytics, health });
+    } catch (err) {
+      if (isAbortError(err)) return;
+      setError(err instanceof ApiError ? err.message : "Failed to load dashboard");
+    } finally {
+      if (!signal.aborted) setLoading(false);
     }
   };
 

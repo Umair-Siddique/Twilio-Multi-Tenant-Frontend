@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { tenantApi } from "@/features/tenant/api/tenantApi";
 import { twilioApi, type AvailableNumber } from "@/features/tenant/api/twilioApi";
 import { ApiError, isAbortError } from "@/shared/api/httpClient";
+import { withRetry } from "@/shared/utils/withRetry";
 import { apiCache, CACHE_KEYS } from "@/shared/cache/apiCache";
 import type { PhoneNumber } from "@/features/tenant/api/tenantApi";
 
@@ -91,7 +92,7 @@ export function PhoneNumbersPage() {
     try {
       isRefresh ? setRefreshing(true) : setLoading(true);
       setError(null);
-      const response = await tenantApi.getPhoneNumbers(signal);
+      const response = await withRetry(() => tenantApi.getPhoneNumbers(signal), signal);
       apiCache.set(CACHE_KEYS.phoneNumbers, response);
       setPhoneNumbers(response.phone_numbers ?? []);
     } catch (err) {

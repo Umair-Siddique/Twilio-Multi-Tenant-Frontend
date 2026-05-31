@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { superAdminApi } from "@/features/super-admin/api/superAdminApi";
 import { ApiError, isAbortError } from "@/shared/api/httpClient";
+import { withRetry } from "@/shared/utils/withRetry";
 import type { CallRecord, EmailLog } from "@/features/super-admin/api/superAdminApi";
 
 type Tab = "calls" | "emails";
@@ -47,7 +48,7 @@ export function MonitoringPage() {
     try {
       setCallsLoading(true);
       setCallsError(null);
-      const res = await superAdminApi.listCalls({ page: p, per_page: 20, ...f }, signal);
+      const res = await withRetry(() => superAdminApi.listCalls({ page: p, per_page: 20, ...f }, signal), signal);
       setCalls(res.calls ?? []);
       setCallsTotalPages(res.pagination?.pages ?? 1);
       setCallsTotal(res.pagination?.total ?? 0);
@@ -63,7 +64,7 @@ export function MonitoringPage() {
     try {
       setEmailsLoading(true);
       setEmailsError(null);
-      const res = await superAdminApi.listEmailLogs({ page: p, per_page: 20, ...f }, signal);
+      const res = await withRetry(() => superAdminApi.listEmailLogs({ page: p, per_page: 20, ...f }, signal), signal);
       setEmails(res.email_logs ?? []);
       setEmailsTotalPages(res.pagination?.pages ?? 1);
       setEmailsTotal(res.pagination?.total ?? 0);

@@ -3,6 +3,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { tenantApi } from "@/features/tenant/api/tenantApi";
 import { ApiError, isAbortError } from "@/shared/api/httpClient";
+import { withRetry } from "@/shared/utils/withRetry";
 import { apiCache, CACHE_KEYS } from "@/shared/cache/apiCache";
 import type { AgentConfig, AgentConfigPayload, Voice } from "@/features/tenant/api/tenantApi";
 import { agentConfigSchema, type AgentConfigFormValues } from "@/features/tenant/schemas/tenantSchemas";
@@ -123,11 +124,11 @@ export function AgentConfigPage() {
 
       try {
         setLoading(true);
-        const [data, voicesData, voiceSelection] = await Promise.all([
+        const [data, voicesData, voiceSelection] = await withRetry(() => Promise.all([
           tenantApi.getAgentConfig(signal),
           tenantApi.getVoices(signal),
           tenantApi.getVoiceSelection(signal)
-        ]);
+        ]), signal);
 
         apiCache.set(CACHE_KEYS.agentConfig,    data);
         apiCache.set(CACHE_KEYS.voices,         voicesData);

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { superAdminApi } from "@/features/super-admin/api/superAdminApi";
 import { ApiError, isAbortError } from "@/shared/api/httpClient";
+import { withRetry } from "@/shared/utils/withRetry";
 import type { GetTenantResponse, UsageResponse, ListTenantUsersResponse } from "@/features/super-admin/api/superAdminApi";
 
 type PageData = { detail: GetTenantResponse | null; usage: UsageResponse | null; users: ListTenantUsersResponse | null };
@@ -32,11 +33,11 @@ export function TenantDetailPage() {
     try {
       setLoading(true);
       setError(null);
-      const [detail, usage, users] = await Promise.all([
+      const [detail, usage, users] = await withRetry(() => Promise.all([
         superAdminApi.getTenant(tenantId, signal),
         superAdminApi.getTenantUsage(tenantId, signal),
         superAdminApi.listTenantUsers(tenantId, signal)
-      ]);
+      ]), signal);
       setData({ detail, usage, users });
     } catch (err) {
       if (isAbortError(err)) return;

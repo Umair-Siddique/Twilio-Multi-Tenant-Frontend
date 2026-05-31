@@ -7,6 +7,7 @@ import {
 } from "@/features/tenant/api/googleCalendarApi";
 import { hubspotApi, type HubspotConnectionResponse } from "@/features/tenant/api/hubspotApi";
 import { ApiError, isAbortError } from "@/shared/api/httpClient";
+import { withRetry } from "@/shared/utils/withRetry";
 
 const MANAGER_ROLES = new Set(["owner", "admin"]);
 
@@ -87,9 +88,9 @@ export function IntegrationsPage() {
     setHsStatusError(null);
 
     const [profileResult, gcResult, hsResult] = await Promise.allSettled([
-      tenantApi.getProfile(),
-      googleCalendarApi.getConnection(),
-      hubspotApi.getConnection()
+      withRetry(() => tenantApi.getProfile()),
+      withRetry(() => googleCalendarApi.getConnection()),
+      withRetry(() => hubspotApi.getConnection())
     ]);
 
     // Profile is critical — determines permission level
