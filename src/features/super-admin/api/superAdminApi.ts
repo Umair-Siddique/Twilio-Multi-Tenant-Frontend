@@ -195,11 +195,29 @@ export type EmailLog = {
   status: string;
   error_message?: string | null;
   sent_at?: string | null;
+  created_at: string;
   tenants?: { id: string; name: string };
 };
 
 export type ListEmailLogsResponse = {
   email_logs: EmailLog[];
+  pagination: Pagination;
+};
+
+export type RecordingRecord = {
+  id: string;
+  tenant_id: string | null;
+  call_id?: string | null;
+  recording_sid: string;
+  status: string;
+  duration_seconds?: number;
+  recording_url?: string | null;
+  created_at: string;
+  tenants?: { id: string; name: string };
+};
+
+export type ListRecordingsResponse = {
+  recordings: RecordingRecord[];
   pagination: Pagination;
 };
 
@@ -279,8 +297,11 @@ export const superAdminApi = {
   getAnalytics: (signal?: AbortSignal) =>
     request<AnalyticsResponse>("/admin/monitoring/analytics", { auth: true, signal }),
 
-  listEmailLogs: (params?: { tenant_id?: string; status?: string; from_date?: string; page?: number; per_page?: number }, signal?: AbortSignal) =>
+  listEmailLogs: (params?: { tenant_id?: string; status?: string; from_date?: string; to_date?: string; page?: number; per_page?: number }, signal?: AbortSignal) =>
     request<ListEmailLogsResponse>(`/admin/monitoring/email-logs${qs(params ?? {})}`, { auth: true, signal }),
+
+  listRecordings: (params?: { tenant_id?: string; status?: string; page?: number; per_page?: number }, signal?: AbortSignal) =>
+    request<ListRecordingsResponse>(`/admin/monitoring/recordings${qs(params ?? {})}`, { auth: true, signal }),
 
   // Super Admins
   listSuperAdmins: (signal?: AbortSignal) =>

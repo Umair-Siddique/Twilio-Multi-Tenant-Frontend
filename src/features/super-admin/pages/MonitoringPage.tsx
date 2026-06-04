@@ -2,12 +2,13 @@ import { useEffect, useState } from "react";
 import { superAdminApi } from "@/features/super-admin/api/superAdminApi";
 import { ApiError, isAbortError } from "@/shared/api/httpClient";
 import { withRetry } from "@/shared/utils/withRetry";
-import type { CallRecord, EmailLog } from "@/features/super-admin/api/superAdminApi";
+import type { CallRecord, EmailLog, RecordingRecord } from "@/features/super-admin/api/superAdminApi";
 
-type Tab = "calls" | "emails";
+type Tab = "calls" | "emails" | "recordings";
 
-const CALL_STATUSES  = ["", "completed", "in-progress", "failed", "busy", "no-answer"];
-const EMAIL_STATUSES = ["", "sent", "failed", "pending"];
+const CALL_STATUSES       = ["", "completed", "in-progress", "ringing", "failed", "busy", "no-answer"];
+const EMAIL_STATUSES      = ["", "sent", "failed", "pending"];
+const RECORDING_STATUSES  = ["", "available", "processing", "deleted", "failed"];
 
 function StatusBadge({ status }: { status: string }) {
   const v = status === "completed" || status === "sent" ? "success"
@@ -41,8 +42,17 @@ export function MonitoringPage() {
   const [emailsPage, setEmailsPage] = useState(1);
   const [emailsTotalPages, setEmailsTotalPages] = useState(1);
   const [emailsTotal, setEmailsTotal] = useState(0);
-  const [emailFilters, setEmailFilters] = useState({ tenant_id: "", status: "", from_date: "" });
-  const [emailDraft,   setEmailDraft]   = useState({ tenant_id: "", status: "", from_date: "" });
+  const [emailFilters, setEmailFilters] = useState({ tenant_id: "", status: "", from_date: "", to_date: "" });
+  const [emailDraft,   setEmailDraft]   = useState({ tenant_id: "", status: "", from_date: "", to_date: "" });
+
+  const [recordings, setRecordings] = useState<RecordingRecord[]>([]);
+  const [recordingsLoading, setRecordingsLoading] = useState(false);
+  const [recordingsError, setRecordingsError] = useState<string | null>(null);
+  const [recordingsPage, setRecordingsPage] = useState(1);
+  const [recordingsTotalPages, setRecordingsTotalPages] = useState(1);
+  const [recordingsTotal, setRecordingsTotal] = useState(0);
+  const [recordingFilters, setRecordingFilters] = useState({ tenant_id: "", status: "" });
+  const [recordingDraft,   setRecordingDraft]   = useState({ tenant_id: "", status: "" });
 
   const loadCalls = async (p = 1, f = callFilters, signal?: AbortSignal) => {
     try {
@@ -76,23 +86,41 @@ export function MonitoringPage() {
     }
   };
 
+  const loadRecordings = async (p = 1, f = recordingFilters, signal?: AbortSignal) => {
+    try {
+      setRecordingsLoading(true);
+      setRecordingsError(null);
+      const res = await withRetry(() => superAdminApi.listRecordings({ page: p, per_page: 20, ...f }, signal), signal);
+      setRecordings(res.recordings ?? []);
+      setRecordingsTotalPages(res.pagination?.pages ?? 1);
+      setRecordingsTotal(res.pagination?.total ?? 0);
+    } catch (err) {
+      if (isAbortError(err)) return;
+      setRecordingsError(err instanceof ApiError ? err.message : "Failed to load recordings");
+    } finally {
+      if (!signal?.aborted) setRecordingsLoading(false);
+    }
+  };
+
   useEffect(() => {
     const controller = new AbortController();
     void loadCalls(1, callFilters, controller.signal);
     void loadEmails(1, emailFilters, controller.signal);
+    void loadRecordings(1, recordingFilters, controller.signal);
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const applyCallFilters  = () => { setCallFilters(callDraft);   setCallsPage(1);  void loadCalls(1, callDraft); };
-  const applyEmailFilters = () => { setEmailFilters(emailDraft); setEmailsPage(1); void loadEmails(1, emailDraft); };
+  const applyCallFilters      = () => { setCallFilters(callDraft);           setCallsPage(1);      void loadCalls(1, callDraft); };
+  const applyEmailFilters     = () => { setEmailFilters(emailDraft);         setEmailsPage(1);     void loadEmails(1, emailDraft); };
+  const applyRecordingFilters = () => { setRecordingFilters(recordingDraft); setRecordingsPage(1); void loadRecordings(1, recordingDraft); };
 
   return (
     <div className="dashboard-page">
       <div className="page-hero">
         <div>
           <h1>Monitoring</h1>
-          <p className="page-subtitle">Platform-wide call logs and email delivery status</p>
+          <p className="page-subtitle">Platform-wide call logs, email delivery status, and recordings</p>
         </div>
         <div className="page-hero-badges">
           {tab === "calls" && !callsLoading && (
@@ -101,12 +129,16 @@ export function MonitoringPage() {
           {tab === "emails" && !emailsLoading && (
             <span className="badge badge-neutral">{emailsTotal.toLocaleString()} emails</span>
           )}
+          {tab === "recordings" && !recordingsLoading && (
+            <span className="badge badge-neutral">{recordingsTotal.toLocaleString()} recordings</span>
+          )}
         </div>
       </div>
 
       <div className="sa-tabs">
         <button className={`sa-tab${tab === "calls" ? " active" : ""}`} onClick={() => setTab("calls")}>All Calls</button>
         <button className={`sa-tab${tab === "emails" ? " active" : ""}`} onClick={() => setTab("emails")}>Email Logs</button>
+        <button className={`sa-tab${tab === "recordings" ? " active" : ""}`} onClick={() => setTab("recordings")}>Recordings</button>
       </div>
 
       {/* ─── Calls Tab ─── */}
@@ -214,8 +246,11 @@ export function MonitoringPage() {
                 {EMAIL_STATUSES.map(s => <option key={s} value={s}>{s || "All statuses"}</option>)}
               </select>
             </label>
-            <label className="field-label">From Date
+            <label className="field-label">From
               <input className="field-input" type="date" value={emailDraft.from_date} onChange={e => setEmailDraft(d => ({ ...d, from_date: e.target.value }))} />
+            </label>
+            <label className="field-label">To
+              <input className="field-input" type="date" value={emailDraft.to_date} onChange={e => setEmailDraft(d => ({ ...d, to_date: e.target.value }))} />
             </label>
             <div style={{ display: "flex", alignItems: "flex-end" }}>
               <button className="dashboard-button" onClick={applyEmailFilters}>Apply</button>
@@ -276,6 +311,93 @@ export function MonitoringPage() {
                   <button className="sa-pagination-btn" disabled={emailsPage <= 1} onClick={() => { setEmailsPage(p => p - 1); void loadEmails(emailsPage - 1); }}>← Prev</button>
                   <span className="sa-pagination-info">Page {emailsPage} of {emailsTotalPages}</span>
                   <button className="sa-pagination-btn" disabled={emailsPage >= emailsTotalPages} onClick={() => { setEmailsPage(p => p + 1); void loadEmails(emailsPage + 1); }}>Next →</button>
+                </div>
+              )}
+            </>
+          )}
+        </>
+      )}
+      {/* ─── Recordings Tab ─── */}
+      {tab === "recordings" && (
+        <>
+          <div className="sa-filter-bar">
+            <label className="field-label" style={{ flex: 2 }}>Tenant ID
+              <input className="field-input" placeholder="Filter by tenant UUID…" value={recordingDraft.tenant_id}
+                onChange={e => setRecordingDraft(d => ({ ...d, tenant_id: e.target.value }))} />
+            </label>
+            <label className="field-label">Status
+              <select className="field-input" value={recordingDraft.status} onChange={e => setRecordingDraft(d => ({ ...d, status: e.target.value }))}>
+                {RECORDING_STATUSES.map(s => <option key={s} value={s}>{s || "All statuses"}</option>)}
+              </select>
+            </label>
+            <div style={{ display: "flex", alignItems: "flex-end" }}>
+              <button className="dashboard-button" onClick={applyRecordingFilters}>Apply</button>
+            </div>
+          </div>
+
+          {recordingsLoading && (
+            <div className="dashboard-table-container">
+              {[...Array(5)].map((_, i) => <div key={i} className="skeleton-block" style={{ height: 52, margin: "8px 16px", borderRadius: 8 }} />)}
+            </div>
+          )}
+          {recordingsError && !recordingsLoading && (
+            <>
+              <div className="form-status error" style={{ marginBottom: 16 }}>{recordingsError}</div>
+              <button className="dashboard-button" onClick={() => void loadRecordings()}>Retry</button>
+            </>
+          )}
+          {!recordingsLoading && !recordingsError && (
+            <>
+              {recordings.length === 0 ? (
+                <div className="empty-state"><h3>No recordings found</h3><p>Try adjusting the filters.</p></div>
+              ) : (
+                <div className="dashboard-table-container" style={{ overflowX: "auto" }}>
+                  <table className="dashboard-table" style={{ minWidth: 780 }}>
+                    <thead>
+                      <tr>
+                        <th>Tenant</th>
+                        <th>Recording SID</th>
+                        <th>Call ID</th>
+                        <th>Status</th>
+                        <th>Duration</th>
+                        <th>URL</th>
+                        <th>Created At</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {recordings.map(r => (
+                        <tr key={r.id}>
+                          <td style={{ fontWeight: 600, color: "var(--text-primary)" }}>
+                            {r.tenants?.name
+                              ?? (r.tenant_id
+                                ? <span className="dashboard-code" style={{ fontSize: "0.75rem" }}>{r.tenant_id.slice(0, 8)}…</span>
+                                : <span style={{ color: "var(--text-muted)" }}>—</span>)}
+                          </td>
+                          <td><span className="dashboard-code" style={{ fontSize: "0.75rem" }}>{r.recording_sid}</span></td>
+                          <td>
+                            {r.call_id
+                              ? <span className="dashboard-code" style={{ fontSize: "0.75rem" }}>{r.call_id.slice(0, 8)}…</span>
+                              : <span style={{ color: "var(--text-muted)" }}>—</span>}
+                          </td>
+                          <td><StatusBadge status={r.status} /></td>
+                          <td>{fmtDuration(r.duration_seconds)}</td>
+                          <td>
+                            {r.recording_url
+                              ? <a href={r.recording_url} target="_blank" rel="noreferrer" style={{ color: "var(--accent)", fontSize: "0.82rem" }}>Listen</a>
+                              : <span style={{ color: "var(--text-muted)" }}>—</span>}
+                          </td>
+                          <td style={{ whiteSpace: "nowrap" }}>{new Date(r.created_at).toLocaleString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {recordingsTotalPages > 1 && (
+                <div className="sa-pagination">
+                  <button className="sa-pagination-btn" disabled={recordingsPage <= 1} onClick={() => { setRecordingsPage(p => p - 1); void loadRecordings(recordingsPage - 1); }}>← Prev</button>
+                  <span className="sa-pagination-info">Page {recordingsPage} of {recordingsTotalPages}</span>
+                  <button className="sa-pagination-btn" disabled={recordingsPage >= recordingsTotalPages} onClick={() => { setRecordingsPage(p => p + 1); void loadRecordings(recordingsPage + 1); }}>Next →</button>
                 </div>
               )}
             </>
